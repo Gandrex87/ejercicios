@@ -4,6 +4,7 @@ __pycache__/
 *.pyd
 venv
 *venv
-.env
-*.env
+.env_ej
+*.env_ej
 .venv
+env_ej
