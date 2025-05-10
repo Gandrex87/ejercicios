@@ -15,7 +15,7 @@ import sys
 GECKODRIVER_PATH = "/Users/andresrsalamanca/Documents/geckodriver" # Cambiar por RUTA DEL GECKODRIVERa
 BASE_URL = "https://quotes.toscrape.com"
 KEYWORDS_TO_FILTER = ["life", "humor"] # Palabras clave para filtrar en el TEXTO de la cita
-OUTPUT_CSV_FILE = "citas_filtradas_refactorizado.csv"
+OUTPUT_CSV_FILE = "data/citas_filtradas.csv"
 
 # Configuración para la Navegación Aleatoria por Subconjunto
 RANGO_PAGINAS_INICIO = 1
