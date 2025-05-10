@@ -1,221 +1,175 @@
 from pywinauto.application import Application
 from pywinauto.findwindows import ElementNotFoundError
 from pywinauto import Desktop
-import time
 import os
+import time
 
-# --- Variables Globales / Configurables ---
-main_window_title_inicial = "Legalización de libros"
+class LegaliaAutomator:
+    """
+    Automatiza el flujo de trabajo principal de la aplicación Legalia:
+      1. Lanzar la app y conectar
+      2. Navegar menú para abrir cuadro de selección
+      3. Seleccionar depósito y Abrir
+      4. Pulsar Comprobar Reglas
+      5. Capturar y cerrar diálogo de error
+      6. Cerrar la aplicación
+    """
+    def __init__(self):
+        # — Configuración global —
+        public = os.environ.get('PUBLIC', r"C:\Users\Public")
+        user   = os.environ.get('USERPROFILE', r"C:\Users\Default")
+        desktop_public = os.path.join(public, 'Desktop')
+        desktop_user   = os.path.join(user,   'Desktop')
+        shortcut_name  = "Legalia 2.lnk"
 
+        self.shortcut_path = os.path.join(desktop_public, shortcut_name)
+        if not os.path.exists(self.shortcut_path):
+            candidate = os.path.join(desktop_user, shortcut_name)
+            if os.path.exists(candidate):
+                self.shortcut_path = candidate
+            else:
+                raise FileNotFoundError(f"No encontré '{shortcut_name}' en {desktop_public} ni en {desktop_user}")
 
-titulo_dialogo_seleccion = 'Selección de la legalización de libros'
-auto_id_dialogo_seleccion = "frmAbrirLegalizacion"
-deposito_a_seleccionar = "PRUEBA_2"
-auto_id_lista_depositos = "lsvLegalizaciones"
-auto_id_boton_abrir_dialogo = "btnSeleccionar"
-texto_boton_abrir_dialogo = "Abrir"
+        # — Titulares y IDs —
+        self.title_main      = "Legalización de libros"
+        self.dialog_title    = "Selección de la legalización de libros"
+        self.dialog_auto_id  = "frmAbrirLegalizacion"
+        self.list_auto_id    = "lsvLegalizaciones"
+        self.deposit_name    = "PRUEBA_2"
+        self.open_btn_auto   = "btnSeleccionar"
 
-titulo_ventana_con_formulario = "Legalización de libros - PRUEBA_2 - Paquete de prueba 2"
-auto_id_ventana_con_formulario = "frmMDIPrincipal"
+        self.form_title      = "Legalización de libros - PRUEBA_2 - Paquete de prueba 2"
+        self.form_auto_id    = "frmMDIPrincipal"
+        self.toolbar_auto_id = "ToolStrip"
+        self.check_btn_title = "Comprobar Reglas"
 
-auto_id_toolbar_en_formulario = "ToolStrip"
-title_boton_comprobar_reglas = "Comprobar Reglas"
+        self.error_title     = "Legalia 2"
+        self.error_text_id   = "65535"
+        self.error_ok_id     = "2"
 
-# Para la ventana de error (Paso 5) - Título y IDs obtenidos de tu print_control_identifiers
-titulo_ventana_error_esperado = "Legalia 2"
-auto_id_texto_error_msg = "65535"      # << Definido aquí
-auto_id_boton_ok_error_dialogo = "2"   # << Definido aquí
-texto_boton_ok_error_dialogo = "OK"  # El título del botón OK
+        # Wrappers
+        self.app                = None
+        self.main_window        = None
+        self.selection_dialog   = None
+        self.form_window        = None
 
-app = None
-main_win_ref_inicial = None
-ventana_formulario_actual = None
-dialogo_interaccion = None
-ventana_error = None
+    def launch_and_connect(self):
+        """
+        Paso 1: Ejecuta el acceso directo y conecta con la ventana principal.
+        """
+        print("Paso 1: Abriendo Legalia…")
+        os.startfile(self.shortcut_path)
+        time.sleep(5)
+        self.app = Application(backend="uia").connect(title=self.title_main, timeout=30)
+        self.main_window = self.app.window(title=self.title_main)
+        self.main_window.wait('ready visible enabled', timeout=10)
+        print("  ✓ Ventana principal lista")
 
+    def navigate_menu(self):
+        """
+        Paso 2: Abre el menú mediante atajos Alt+F, Ctrl+A.
+        """
+        print("Paso 2: Navegando menú (Alt+F, Ctrl+A)…")
+        win = self.main_window
+        win.set_focus()
+        win.type_keys('%F', pause=0.7)
+        win.type_keys('^A', pause=0.7)
+        time.sleep(3)
+        print("  ✓ Menú abierto")
 
-
-# Ruta al acceso directo de forma más genérica
-try:
-    # Obtener la ruta de la carpeta pública y construir la ruta al Escritorio Público
-    public_folder = os.environ['PUBLIC']
-    public_desktop_path = os.path.join(public_folder, 'Desktop')
-    shortcut_name = "Legalia 2.lnk" # Asumimos que el nombre del acceso directo es consistente
-    shortcut_path = os.path.join(public_desktop_path, shortcut_name)
-
-    # Verificar si el acceso directo existe en esa ubicación
-    if not os.path.exists(shortcut_path):
-        print(f"ADVERTENCIA: El acceso directo '{shortcut_name}' no se encontró en el Escritorio Público: {public_desktop_path}")
-        # Podrías intentar otra ubicación común aquí, como el escritorio del usuario actual
-        user_profile_folder = os.environ['USERPROFILE']
-        user_desktop_path = os.path.join(user_profile_folder, 'Desktop')
-        shortcut_path_user = os.path.join(user_desktop_path, shortcut_name)
-        if os.path.exists(shortcut_path_user):
-            print(f"Se encontró el acceso directo en el Escritorio del Usuario Actual: {shortcut_path_user}")
-            shortcut_path = shortcut_path_user
-        else:
-            print(f"ADVERTENCIA: El acceso directo tampoco se encontró en el Escritorio del Usuario Actual: {user_desktop_path}")
-            print("Por favor, verifica la ubicación y el nombre del acceso directo 'Legalia 2.lnk' o actualiza la ruta en el script.")
-            # Podrías decidir salir si no se encuentra, o pedir la ruta al usuario.
-            # Por ahora, el script podría fallar más adelante si shortcut_path no es válido.
-            # sys.exit("Error: No se pudo localizar el acceso directo de Legalia.") # Descomenta para salir si no se encuentra
-    else:
-        print(f"Usando acceso directo encontrado en: {shortcut_path}")
-
-except KeyError as e_env:
-    print(f"Error: No se pudo encontrar la variable de entorno necesaria ({e_env}). Usando una ruta por defecto (esto podría fallar).")
-    # Ruta de fallback si no se pueden obtener las variables de entorno (menos probable)
-    shortcut_path = r"C:\Users\Public\Desktop\Legalia 2.lnk"
-
-# --- PASO 1, 2, 3, 4 (Como los teníamos y funcionaban) ---
-try:
-    print("Paso 1: Abriendo Legalia...")
-    os.startfile(shortcut_path)
-    time.sleep(5)
-    app = Application(backend="uia").connect(title=main_window_title_inicial, timeout=30)
-    main_win_ref_inicial = app.window(title=main_window_title_inicial)
-    main_win_ref_inicial.wait('ready', timeout=10)
-    print(f"Ventana '{main_win_ref_inicial.window_text()}' encontrada y lista.")
-
-    print("\nPaso 2: Navegando al menú (Alt+F, Ctrl+A)...")
-    main_win_ref_inicial.set_focus()
-    main_win_ref_inicial.type_keys('%F', pause=0.7)
-    main_win_ref_inicial.type_keys('^A', pause=0.7)
-    time.sleep(3)
-    print("Pasos 1 y 2 completados.")
-
-    print(f"\nPaso 3: Interactuando con diálogo '{titulo_dialogo_seleccion}'...")
-    dialogo_interaccion = main_win_ref_inicial.child_window(
-        title=titulo_dialogo_seleccion, auto_id=auto_id_dialogo_seleccion, control_type="Window")
-    dialogo_interaccion.wait('ready', timeout=30)
-    dialogo_interaccion.set_focus()
-    lista_control = dialogo_interaccion.child_window(auto_id=auto_id_lista_depositos, control_type="List")
-    lista_control.wait('ready', timeout=15)
-    item_a_seleccionar_wrapper = lista_control.get_item(deposito_a_seleccionar)
-    if not item_a_seleccionar_wrapper.is_selected():
-        item_a_seleccionar_wrapper.select()
-    time.sleep(0.5)
-    boton_abrir_dialogo = dialogo_interaccion.child_window(auto_id=auto_id_boton_abrir_dialogo, control_type="Button")
-    boton_abrir_dialogo.wait('enabled', timeout=10)
-    boton_abrir_dialogo.click_input()
-    dialogo_interaccion.wait_not('visible', timeout=15)
-    time.sleep(2)
-    print(f"Interacción con diálogo '{titulo_dialogo_seleccion}' completada.")
-
-    print(f"\nPaso 4: Clic en '{title_boton_comprobar_reglas}' en formulario '{titulo_ventana_con_formulario}'...")
-    ventana_formulario_actual = app.window(title=titulo_ventana_con_formulario, auto_id=auto_id_ventana_con_formulario)
-    ventana_formulario_actual.wait('ready', timeout=20)
-    ventana_formulario_actual.set_focus()
-    current_form_title_check = ventana_formulario_actual.window_text()
-    print(f"Ventana del formulario encontrada y activa: '{current_form_title_check}'.")
-    tool_bar = ventana_formulario_actual.child_window(auto_id=auto_id_toolbar_en_formulario, control_type="ToolBar")
-    tool_bar.wait('ready', timeout=10)
-    boton_comprobar = tool_bar.child_window(title=title_boton_comprobar_reglas, control_type="Button")
-    boton_comprobar.wait('enabled', timeout=10)
-    boton_comprobar.click_input()
-    print(f"Botón '{title_boton_comprobar_reglas}' presionado.")
-    print("Esperando (5 segundos) a que aparezca la ventana de error...")
-    time.sleep(5)
-    print("\nPaso 4 completado. La ventana de error debería estar visible.")
-
-except Exception as e_prev:
-    print(f"Error en Pasos 1-4: {e_prev}")
-    active_window_for_error = ventana_formulario_actual if ventana_formulario_actual and ventana_formulario_actual.exists(timeout=1) else main_win_ref_inicial
-    if active_window_for_error and active_window_for_error.exists(timeout=1):
-        try:
-            active_window_for_error.capture_as_image().save("error_pasos_1_a_4.png")
-            print("Captura de pantalla 'error_pasos_1_a_4.png' guardada.")
-        except ImportError: print("PIL/Pillow no instalado para capturas.")
-        except Exception: pass
-    exit()
-
-# --- PASO 5: CAPTURAR MENSAJE DE ERROR, GUARDAR Y "CERRAR" DIÁLOGO DE ERROR ---
-if ventana_formulario_actual and ventana_formulario_actual.exists(timeout=1):
-    try:
-        print(f"\nPaso 5: Buscando la ventana de error '{titulo_ventana_error_esperado}' como hija de '{ventana_formulario_actual.window_text()}'...")
-        time.sleep(1)
-
-        ventana_error = ventana_formulario_actual.child_window(
-            title=titulo_ventana_error_esperado,
+    def select_book(self):
+        """
+        Paso 3: Selecciona el depósito PRUEBA_2 en el diálogo de selección.
+        """
+        print(f"Paso 3: Seleccionando depósito '{self.deposit_name}'…")
+        dlg = self.main_window.child_window(
+            title=self.dialog_title,
+            auto_id=self.dialog_auto_id,
             control_type="Window"
         )
-        print(f"Esperando que la ventana de error '{titulo_ventana_error_esperado}' esté lista...")
-        ventana_error.wait('ready', timeout=20)
-        ventana_error.set_focus()
-        titulo_real_error_encontrado = ventana_error.window_text()
-        print(f"Ventana de error encontrada: '{titulo_real_error_encontrado}'. Está lista y enfocada.")
+        dlg.wait('ready visible enabled', timeout=30)
+        dlg.set_focus()
+        lst = dlg.child_window(auto_id=self.list_auto_id, control_type="List")
+        lst.wait('ready visible', timeout=15)
+        item = lst.get_item(self.deposit_name)
+        if not item.is_selected():
+            item.select()
+        time.sleep(0.5)
+        btn = dlg.child_window(auto_id=self.open_btn_auto, control_type="Button")
+        btn.wait('enabled visible', timeout=10).click_input()
+        dlg.wait_not('visible', timeout=15)
+        time.sleep(2)
+        self.selection_dialog = dlg
+        print("  ✓ Diálogo de selección completado")
 
-        print(f"Capturando el texto del error del control con auto_id='{auto_id_texto_error_msg}'...")
-        control_texto_error = ventana_error.child_window(
-            auto_id=auto_id_texto_error_msg, control_type="Text")
-        control_texto_error.wait('visible', timeout=10)
-        texto_capturado = control_texto_error.window_text()
-        print(f"Texto del error capturado: '{texto_capturado}'")
+    def press_check_rules(self):
+        """
+        Paso 4: Pulsa el botón 'Comprobar Reglas' en el formulario.
+        """
+        print(f"Paso 4: Presionando '{self.check_btn_title}'…")
+        frm = self.app.window(title=self.form_title, auto_id=self.form_auto_id)
+        frm.wait('ready visible enabled', timeout=20).set_focus()
+        tb = frm.child_window(auto_id=self.toolbar_auto_id, control_type="ToolBar")
+        tb.wait('ready visible', timeout=10)
+        btn = tb.child_window(title=self.check_btn_title, control_type="Button")
+        btn.wait('enabled visible', timeout=10).click_input()
+        time.sleep(5)
+        self.form_window = frm
+        print("  ✓ Botón de comprobación pulsado")
 
-        nombre_fichero_resultado = "resultado.txt"
-        with open(nombre_fichero_resultado, "w", encoding="utf-8") as f:
-            f.write(texto_capturado)
-        print(f"Mensaje de error guardado en '{nombre_fichero_resultado}'.")
+    def handle_error_dialog(self):
+        """
+        Paso 5: Captura el mensaje de error, lo guarda y cierra el diálogo.
+        """
+        print("Paso 5: Capturando mensaje y cerrando error…")
+        frm = self.form_window
+        dlg = frm.child_window(title=self.error_title, control_type="Window")
+        dlg.wait('ready visible enabled', timeout=20).set_focus()
 
-        print(f"Buscando el botón 'OK' (auto_id='{auto_id_boton_ok_error_dialogo}') en la ventana de error...")
-        boton_ok_error = ventana_error.child_window(
-            auto_id=auto_id_boton_ok_error_dialogo, control_type="Button")
-        boton_ok_error.wait('enabled', timeout=10)
-        print(f"Botón 'OK' encontrado. Haciendo clic...")
-        boton_ok_error.click_input()
-        print(f"Botón 'OK' presionado.")
+        txt_ctrl = dlg.child_window(auto_id=self.error_text_id, control_type="Text")
+        txt_ctrl.wait('visible', timeout=10)
+        msg = txt_ctrl.window_text()
+        print(f"  → Mensaje de error: '{msg}'")
+        
+        # Guardar a archivo
+        with open("resultado.txt", "w", encoding="utf-8") as f:
+            f.write(msg)
+        print("  → Mensaje guardado en 'resultado.txt'")
 
-        # MODIFICACIÓN: Simplemente esperamos un momento después de hacer clic en OK.
-        print("Esperando 1 segundo para que el diálogo de error se procese/cierre...")
+        ok_btn = dlg.child_window(auto_id=self.error_ok_id, control_type="Button")
+        ok_btn.wait('enabled visible', timeout=10).click_input()
         time.sleep(1)
-        if ventana_error.exists(timeout=0.5) and ventana_error.is_visible(): # Comprobación rápida
-             print(f"Advertencia: La ventana de error '{titulo_real_error_encontrado}' todavía parece estar visible.")
-        else:
-             print(f"Ventana de error '{titulo_real_error_encontrado}' parece cerrada o ya no es visible.")
-        print("\nPaso 5 completado.")
+        print("  ✓ Diálogo de error cerrado")
 
-    except ElementNotFoundError as e_nf_err:
-        print(f"Error CRÍTICO en Paso 5 (ElementNotFound): {e_nf_err}")
-        exit()
-    except Exception as e_err:
-        print(f"Error general en Paso 5 (Manejar ventana de error): {e_err}")
-        exit()
-else:
-    print("Paso 5 (manejo de ventana de error) omitido.")
-    exit()
-
-# --- PASO 6: CERRAR LEGALIA ---
-if ventana_formulario_actual and ventana_formulario_actual.exists(timeout=1):
-    try:
-        print(f"\nPaso 6: Intentando cerrar la aplicación Legalia (ventana: '{ventana_formulario_actual.window_text()}')...")
-        ventana_formulario_actual.set_focus()
-        
-        print("Enviando comando de cierre (close)...")
-        ventana_formulario_actual.close()
-        
-        print("Esperando 3 segundos para que la aplicación se cierre...")
+    def close_application(self):
+        """
+        Paso 6: Cierra la ventana del formulario y el proceso si sigue activo.
+        """
+        print("Paso 6: Cerrando Legalia…")
+        frm = self.form_window
+        frm.set_focus()
+        frm.close()
         time.sleep(3)
-        
-        if app.is_process_running():
-            print("Advertencia: El proceso de la aplicación Legalia SIGUE CORRIENDO después de 'close()'.")
-            print("Esto puede ser debido a diálogos de confirmación no guardados o manejo especial del cierre.")
-            print("Intentando forzar el cierre con app.kill()...")
-            try:
-                app.kill(soft=False) # soft=False es más contundente (equivale a Terminar Proceso)
-                print("Comando app.kill() enviado. Esperando 2 segundos adicionales...")
-                time.sleep(2)
-                if not app.is_process_running():
-                    print("Aplicación Legalia cerrada exitosamente con app.kill().")
-                else:
-                    print("Error: La aplicación Legalia AÚN sigue corriendo incluso después de app.kill().")
-            except Exception as e_kill:
-                print(f"Error al intentar app.kill(): {e_kill}")
-        else:
-            print("Aplicación Legalia cerrada exitosamente con el comando close().")
+        if self.app.is_process_running():
+            self.app.kill(soft=False)
+            time.sleep(2)
+        print("  ✓ Aplicación cerrada")
 
-    except Exception as e_close:
-        print(f"Error durante el cierre de Legalia: {e_close}")
-else:
-    print("Paso 6 (cerrar Legalia) omitido.")
+    def run_all(self):
+        try:
+            self.launch_and_connect()
+            self.navigate_menu()
+            self.select_book()
+            self.press_check_rules()
+            self.handle_error_dialog()
+        except Exception as e:
+            print(f"ERROR en la automatización: {e}")
+            raise
+        finally:
+            if self.form_window and self.form_window.exists(timeout=1):
+                self.close_application()
+            print("\n--- Script completado ---")
 
-print("\n--- Script de Automatización Completado ---")
+if __name__ == "__main__":
+    automator = LegaliaAutomator()
+    automator.run_all()
